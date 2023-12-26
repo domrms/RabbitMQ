@@ -1,30 +1,46 @@
-﻿using RabbitMQ.Client;
+﻿using System;
+using RabbitMQ.Client;
 
-namespace RabbitMQSender
+public class Program
 {
-    public class Program
+    private const string HostName = "localhost";
+    private const string QueueName = "hello";
+    private const string DeadLetterExchangeName = "dead-letter-exchange";
+    private const string DeadLetterQueueName = "dead-letter-queue";
+
+    static void Main(string[] args)
     {
-        private const string HostName = "localhost";
-        private const string QueueName = "hello";
-        private const string Message = "Hello, RabbitMQ!";
-        static void Main(string[] args)
+        var factory = new ConnectionFactory() { HostName = HostName };
+
+        using (var connection = factory.CreateConnection())
+        using (var channel = connection.CreateModel())
         {
-            var factory = new ConnectionFactory() { HostName = HostName };
+            // Declare the DLX and DLQ
+            channel.ExchangeDeclare(DeadLetterExchangeName, ExchangeType.Fanout);
+            channel.QueueDeclare(DeadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
+            channel.QueueBind(DeadLetterQueueName, DeadLetterExchangeName, "");
 
-            using (var connection = factory.CreateConnection())
-            using (var channel = connection.CreateModel())
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.DeliveryMode = 2; // persistent
+
+            // Declare the main queue with DLX/DLQ arguments
+            var queueArgs = new Dictionary<string, object>
             {
-                channel.QueueDeclare(queue: QueueName, durable: false, exclusive: false, autoDelete: false, arguments: null);
+                { "x-dead-letter-exchange", DeadLetterExchangeName },
+                { "x-dead-letter-routing-key", "" }
+            };
 
-                var body = System.Text.Encoding.UTF8.GetBytes(Message);
+            channel.QueueDeclare(queue: QueueName, durable: false, exclusive: false, autoDelete: false, arguments: queueArgs);
 
-                channel.BasicPublish(exchange: "", routingKey: QueueName, basicProperties: null, body: body);
-                Console.WriteLine($" [x] Sent '{Message}'");
-            }
+            var message = "Hello, RabbitMQ!";
+            var body = System.Text.Encoding.UTF8.GetBytes(message);
 
-            Console.WriteLine(" Press [enter] to exit.");
-            Console.ReadLine();
+            channel.BasicPublish(exchange: "", routingKey: QueueName, basicProperties: properties, body: body);
+            Console.WriteLine($" [x] Sent '{message}'");
         }
 
+        Console.WriteLine(" Press [enter] to exit.");
+        Console.ReadLine();
     }
 }
